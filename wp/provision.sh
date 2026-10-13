@@ -130,6 +130,28 @@ for seoplugin in wordpress-seo add-wpgraphql-seo; do
   fi
 done
 
+echo "==> Installing MCP Adapter + the scoped mcp_content_editor role"
+# Replaces hand-rolled SSH/SFTP/eval-file content edits with typed, authenticated MCP tool
+# calls (docs/mcp-content-editing.md; FRICTION 2026-10-13 — earned on Website Navigator after
+# a long debugging session on the manual flow's sharp edges). The role is created with ONLY
+# content-edit capabilities — no plugin/theme/file/user-management capabilities — so an
+# Application Password for it can never be used to do more than edit existing posts/pages.
+if ! wpcli "plugin is-installed mcp-adapter" 2>/dev/null; then
+  wpcli "plugin install mcp-adapter --activate"
+else
+  wpcli "plugin activate mcp-adapter"
+fi
+if ! wpcli "role get mcp_content_editor" >/dev/null 2>&1; then
+  wpcli "role create mcp_content_editor 'MCP Content Editor'"
+  for cap in read edit_posts edit_published_posts edit_others_posts edit_pages edit_published_pages edit_others_pages upload_files; do
+    wpcli "cap add mcp_content_editor $cap"
+  done
+fi
+# NOT automated here: creating the actual MCP-client WP user + its Application Password — that's
+# a live secret that must never land in a provisioning log. See docs/mcp-content-editing.md
+# "First-time setup per site" for the one-off wp-cli commands (wp user create + wp user
+# application-password create --porcelain, redirected straight to a secrets file).
+
 # Headless URL pattern: set the WordPress "Site Address (home)" to the FRONTEND origin so
 # Yoast/WP build canonical + OG + schema URLs against the frontend (see pod-yoast-headless.php).
 # WordPress Address (siteurl) stays the WP backend so /wp-admin + /graphql keep working.
