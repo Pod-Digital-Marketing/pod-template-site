@@ -8,8 +8,19 @@
 #
 # CI gates (workflow/02 — agents cannot merge violations; docs/workflow/39 for the live gates).
 #
-#   verify         every PR + push to main — lint + typecheck + build WITHOUT WordPress.
+#   verify         every PR + push to main — lint + typecheck + build, then a11y (pa11y/axe,
+#                  WCAG2AA) + JSON-LD structured-data validation against the built output.
 #                  Fallback content keeps the build green, proving "WP down ≠ site down".
+#                  a11y/jsonld scripts existed since 2026-06-13 but were never CI-wired —
+#                  the KB's quality bar was real but unenforced on every PR until now
+#                  (FRICTION 2026-10-13). linkinator ("pnpm links") stays OUT of per-PR CI
+#                  on purpose — it's a pre-launch go-live gate (docs/links.md), not a per-PR
+#                  one: it legitimately fails on an in-progress site's placeholder links.
+#   php-lint       every PR + push to main — `php -l` syntax-checks every wp/**/*.php file.
+#                  Catches a fatal before it ever reaches a live WP Engine install — the
+#                  wp/ directory (mu-plugins especially) previously had ZERO automated
+#                  check of any kind; every bug there was caught by hand, post-deploy,
+#                  on production (FRICTION 2026-10-13, the ACF MCP abilities saga).
 #   live-contract  every PR + push to main — provision a REAL WordPress, introspect its
 #                  schema, and validate every committed *.graphql against it. Kills the
 #                  "mock-green ≠ live-green" class: a query asking live WP for a field the
@@ -18,6 +29,11 @@
 #   live-build     nightly + manual — provision a real WordPress and run `pnpm build`
 #                  against it. The full-render backstop (adapters/zod/ISR) the fast
 #                  contract check doesn't exercise.
+#
+# NOT covered yet: no unit/integration test suite exists in this repo at all (no vitest/
+# jest, zero *.test.ts files) — typecheck+build prove the shapes line up, not that logic
+# is correct. Flagged, not fixed here — scoping what to test and with what framework is a
+# separate decision, not a CI-wiring change. See FRICTION 2026-10-13.
 #
 # The live jobs need the ACF Pro zip (a licensed binary) — fetched from the private
 # acf-vendor R2 Worker via the ACF_PRO_URL + ACF_PRO_TOKEN repo secrets. When those are
@@ -51,6 +67,28 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
+      # jsonld/a11y each wrap their own start-server-and-test — reuses the .next build
+      # above (next start, no rebuild), so this is cheap. CMS_MODE is unset here (no
+      # WPGRAPHQL_URL either), same as the build step, so this runs against fallback
+      # content — consistent with "WP down ≠ site down".
+      - run: pnpm jsonld
+      - run: pnpm a11y
+
+  php-lint:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4" # matches the live WP Engine PHP version
+      - name: Syntax-check every wp/**/*.php file
+        run: |
+          lint_status=0
+          while IFS= read -r -d '' f; do
+            php -l "$f" || lint_status=1
+          done < <(find wp -name '*.php' -print0)
+          exit $lint_status
 
   live-contract:
     if: github.event_name == 'pull_request' || github.event_name == 'push'
