@@ -32,8 +32,13 @@ export async function POST(request: NextRequest) {
       ? requested
       : ["pages"];
 
-  // Next 16 signature: a cache-life profile is required — "max" = purge now,
-  // regenerate on next request (classic webhook-driven ISR).
-  tags.forEach((tag) => revalidateTag(tag, "max"));
+  // { expire: 0 }, not a named profile like "max": this project has no `cacheLifeProfiles`
+  // configured (cacheComponents is off), so a string profile resolves to `undefined` inside
+  // Next's revalidate() and SKIPS setting pathWasRevalidated — the flag that actually purges
+  // the Full Route Cache/CDN artifact (confirmed in next/dist/.../revalidate.js: the purge
+  // only fires when `!profile || cacheLife?.expire === 0`). An explicit { expire: 0 } object
+  // satisfies that check directly, with no dependency on named cache-life profiles. "max" was
+  // a silent no-op — content updates never actually purged the CDN (FRICTION 2026-10-13).
+  tags.forEach((tag) => revalidateTag(tag, { expire: 0 }));
   return NextResponse.json({ revalidated: true, tags });
 }

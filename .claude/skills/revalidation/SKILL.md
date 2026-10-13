@@ -11,7 +11,7 @@ Pages are static (see `page-templates`). They refresh **on demand** when WordPre
 
 ```
 WP "post saved"  →  POST /api/revalidate?secret=<REVALIDATE_SECRET>   (body: { "tags": [...] })
-                 →  revalidateTag(tag, "max") for each tag
+                 →  revalidateTag(tag, { expire: 0 }) for each tag
                  →  tagged pages purge, regenerate on next request
 ```
 
@@ -35,14 +35,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ revalidated: false }, { status: 401 });
 
   // body { tags: string[] } → revalidate those; omitted/invalid → default ["pages"] (purge all)
-  tags.forEach((tag) => revalidateTag(tag, "max"));
+  tags.forEach((tag) => revalidateTag(tag, { expire: 0 }));
   return NextResponse.json({ revalidated: true, tags });
 }
 ```
 
 - **Auth**: the `?secret=` must equal `REVALIDATE_SECRET` (env). Missing env or mismatch → `401`. Configure the secret in the WP webhook URL.
 - **Default**: if the body omits `tags`, it revalidates `["pages"]` — coarse but always-correct. Prefer sending precise tags (`["page:<slug>"]`) from the webhook so one edit doesn't purge the whole site.
-- **`"max"`** is the Next 16 cache-life profile: purge now, regenerate on next request (classic webhook-driven ISR). For "must appear instantly" cases you can define a tighter cache-life profile (the `client.ts` note refers to `{ expire: 0 }`) — but the shipped behaviour is `"max"`; don't claim instant unless you've changed this.
+- **`{ expire: 0 }`**, never a named string profile like `"max"`. This project has no `cacheLifeProfiles` configured (Cache Components is off) — a string profile silently resolves to `undefined` inside Next's `revalidate()`, which means the flag that purges the Full Route Cache/CDN artifact (`pathWasRevalidated`) never gets set. The Data Cache entry looks "revalidated" but the actual static HTML never regenerates — content changes never reach the live site, with no error anywhere. **Confirmed live** on Website Navigator 2026-10-13 (FRICTION): `revalidateTag(tag, "max")` returned `{revalidated:true}` every time, but CDN `Age` kept climbing for 5+ minutes. Always use the object form.
 
 ## Adding freshness for a new content type
 
@@ -61,7 +61,16 @@ curl -XPOST "$SITE/api/revalidate?secret=nope" -i
 
 Revalidation only does something against a **real cached deployment** (Vercel preview/prod or a built `next start`) — `CMS_MODE=mock`/`pnpm dev` has nothing meaningful to purge. Test it where pages are actually statically cached.
 
+**`{revalidated:true}` in the response is NOT proof the purge worked** — the route can return that even when `pathWasRevalidated` silently never got set (the exact "max" bug above). Confirm against the actual CDN response, not just the route's own reply:
+
+```bash
+curl -sI "$SITE/" | grep -i "age:\|x-vercel-cache"   # before
+# ...POST to /api/revalidate...
+curl -sI "$SITE/" | grep -i "age:\|x-vercel-cache"   # after — Age must reset near 0
+```
+
 ## Don't
 
 - Don't drop the secret check or read it from the body — it must come from the query string and match the env.
 - Don't default to revalidating nothing — the current default (`["pages"]`) is intentional so a misconfigured webhook still refreshes.
+- Don't pass a string cache-life profile (`"max"`, `"days"`, etc.) as the second argument to `revalidateTag` on this stack — there are no `cacheLifeProfiles` configured, so it silently no-ops the CDN purge. Always `{ expire: 0 }`.
