@@ -5,6 +5,14 @@ description: The STANDARD way to edit live content (ACF fields, flexible-content
 
 # wp-content-edit — editing live WP content the same way every time
 
+**Check `docs/mcp-content-editing.md` first.** For routine single-field ACF edits on the
+`blocks` flexible-content convention, the `pod/get-acf-block-field` / `pod/update-acf-block-field`
+MCP abilities are the default path now — one typed, pre-validated tool call instead of the
+manual flow below, and they fix the row-indexing bug this manual flow is sharpest on (see
+that doc). **Everything below is the fallback** — for anything the MCP abilities don't cover
+(other post types, non-`blocks` fields, options, plugins, one-off diagnostics), or on a site
+that hasn't had the MCP setup done yet.
+
 Every WP Engine-hosted client site needs the same three steps to change live content and see it on the frontend. This used to get re-derived from scratch per session (slow, error-prone). Don't — follow this.
 
 ## Step 1 — find what to change
